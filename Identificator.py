@@ -33,7 +33,9 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QMessageBox,
-    QFileDialog
+    QFileDialog,
+    QAction,
+    QMenu
 )
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtCore import QUrl
@@ -49,7 +51,7 @@ class App(QWidget):
         if os.path.isdir(parsed_args.destination):
             self.dest_dir = os.path.abspath(parsed_args.destination)
         else:
-            self.dest_dir = QFileDialog.getExistingDirectory(self, "Select Directory")
+            self.dest_dir = QFileDialog.getExistingDirectory(self, "Select a directory")
 
         if not self.dest_dir:
             self.forced_exit()
@@ -59,7 +61,7 @@ class App(QWidget):
 
         self.prev_files = [os.path.abspath(file) for file in parsed_args.files]
         if any(not os.path.isfile(file) for file in self.prev_files) or not self.prev_files:
-            self.prev_files, _ = QFileDialog.getOpenFileNames(self, "Select files to rename")
+            self.prev_files, _ = QFileDialog.getOpenFileNames(self, "Select a files to rename")
 
         if not self.prev_files:
             message = ("You have not selected any files.\n"
@@ -67,25 +69,35 @@ class App(QWidget):
             QMessageBox.information(None, "Information", message)
 
         self.new_files = []
-        self.authors = []
+        self.identifiers = []
         self.busy_numbers = {}
         
-        self.get_authors()
+        self.get_identifiers()
 
         layout = QVBoxLayout()
 
-        label = QLabel("Select the author:")
+        label = QLabel("Select the identifier:")
         layout.addWidget(label)
 
         self.combobox = QComboBox()
-        self.combobox.addItems(self.authors)
+        self.combobox.addItems(self.identifiers)
         self.combobox.setEditable(True)
         layout.addWidget(self.combobox)
 
         button_layout = QHBoxLayout()
 
         open_button = QPushButton("Open")
-        open_button.clicked.connect(self.open_explorer)
+        open_menu = QMenu()
+
+        self.explorer_action = QAction("In Explorer")
+        self.explorer_action.triggered.connect(self.open_explorer)
+        open_menu.addAction(self.explorer_action)
+
+        self.file_action = QAction("As file")
+        self.file_action.triggered.connect(self.open_explorer)
+        open_menu.addAction(self.file_action)
+
+        open_button.setMenu(open_menu)
         button_layout.addWidget(open_button)
 
         rename_button = QPushButton("Rename")
@@ -102,14 +114,14 @@ class App(QWidget):
         self.setLayout(layout)
 
     def rename_files(self):
-        author = self.combobox.currentText()
-        if author == "":
-            QMessageBox.information(self, "Information", "Please select an author!")
+        identifier = self.combobox.currentText()
+        if identifier == "":
+            QMessageBox.information(self, "Information", "Please select an identifier!")
             return
 
-        author = author.strip()
-        self.get_busy_numbers(author)
-        used = set(self.busy_numbers.get(author, []))
+        identifier = identifier.strip()
+        self.get_busy_numbers(identifier)
+        used = set(self.busy_numbers.get(identifier, []))
         free_numbers = []
         current = 1
         while len(free_numbers) < len(self.prev_files):
@@ -118,7 +130,7 @@ class App(QWidget):
             current += 1
 
         self.new_files = [
-            os.path.join(self.dest_dir, f"{author}-{num}{os.path.splitext(file)[1]}")
+            os.path.join(self.dest_dir, f"{identifier}-{num}{os.path.splitext(file)[1]}")
             for file, num in zip(self.prev_files, free_numbers)
         ]
 
@@ -145,46 +157,52 @@ class App(QWidget):
                 QMessageBox.information(self, "Information", "Done!")
                 self.close()
             except Exception as e:
-                QMessageBox.critical(self, "Error", str(e))
+                self.msgbox_error(e)
                 self.forced_exit()
         else:
             QMessageBox.information(self, "Information", "Cancel!")
 
     def open_explorer(self):
-        author = self.combobox.currentText()
-        if author:
-            try:
-                if author not in self.busy_numbers:
-                    self.get_busy_numbers(author)
-                for file in os.listdir(self.dest_dir):
-                    if file.startswith(f"{author}-{self.busy_numbers[author][0]}"):
-                        path = os.path.join(self.dest_dir, file).replace("/", "\\")
-                        subprocess.run(["explorer", "/select,", path])
-                        break
-            except IndexError:
-                QMessageBox.critical(self, "Error!", "This author is not in the directory")
-            except Exception as e:
-                QMessageBox.critical(self, "Error!", str(e))
+        identifier = self.combobox.currentText()
+        try:
+            if identifier not in self.busy_numbers:
+                self.get_busy_numbers(identifier)
+            for file in os.listdir(self.dest_dir):
+                if file.startswith(f"{identifier}-{self.busy_numbers[identifier][0]}"):
+                    path = os.path.join(self.dest_dir, file).replace("/", "\\")
+                    match self.sender():
+                        case self.explorer_action:
+                            subprocess.run(["explorer", "/select,", path])
+                        case self.file_action:
+                            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
-    def get_authors(self):
+                    break
+        except IndexError:
+            QMessageBox.critical(self, "Error!", "This identifier is not in the directory")
+        except Exception as e:
+            self.msgbox_error(e)
+
+    # TODO: сортировка на уровке os
+    def get_identifiers(self):
         regex = re.compile(REGEX_GET_ID)
         for file in os.listdir(self.dest_dir):
             if match := regex.match(file):
-                author = match.group(1).strip()
-                if author not in self.authors:
-                    self.authors.append(author)
+                identifier = match.group(1).strip()
+                if identifier not in self.identifiers:
+                    self.identifiers.append(identifier)
 
-        self.authors.sort()
-
-    def get_busy_numbers(self, author):
+    def get_busy_numbers(self, identifier):
         regex = re.compile(REGEX_GET_NUM)
-        if author not in self.busy_numbers:
-            self.busy_numbers[author] = [
+        if identifier not in self.busy_numbers:
+            self.busy_numbers[identifier] = [
                 int(match.group(1)) 
                 for file in os.listdir(self.dest_dir)
                 if (match := regex.match(file))
-                and file.startswith(f"{author}-")
+                and file.startswith(f"{identifier}-")
             ]
+
+    def msgbox_error(self, e):
+        QMessageBox.critical(self, "Error!", f"{type(e)}: {e}")
 
     def forced_exit(self):
         self.close()
