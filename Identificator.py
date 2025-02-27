@@ -154,14 +154,16 @@ class App(QWidget):
         result = msg.exec_()
 
         if result == QMessageBox.Yes:
-            try:
-                for i in range(len(self.prev_files)):
+            for i in range(len(self.prev_files)):
+                try:
                     shutil.move(self.prev_files[i], self.new_files[i])
-                QMessageBox.information(self, "Information", "Done!")
-                self.close()
-            except Exception as e:
-                self.msgbox_error(e)
-                self.forced_exit()
+                except Exception as e:
+                    message = (f"Error while renaming files:\n"
+                               f"\"{self.prev_files[i]}\" -> \"{self.new_files[i]}\"\n\n"
+                               f"{type(e)}: {e}")
+                    QMessageBox.critical(self, "Error!", message)
+            QMessageBox.information(self, "Information", "Done!")
+            self.close()
         else:
             QMessageBox.information(self, "Information", "Cancel!")
 
@@ -185,7 +187,6 @@ class App(QWidget):
         except Exception as e:
             self.msgbox_error(e)
 
-    # TODO: сортировка на уровке os
     def get_identifiers(self):
         regex = re.compile(REGEX_GET_ID)
         for file in os.listdir(self.dest_dir):
