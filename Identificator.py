@@ -82,6 +82,9 @@ class App(QWidget):
         self.combobox = QComboBox()
         self.combobox.addItems(self.identifiers)
         self.combobox.setEditable(True)
+        self.combobox.setFocus()
+        self.combobox.lineEdit().selectAll()
+        self.combobox.lineEdit().returnPressed.connect(self.rename_files)
         layout.addWidget(self.combobox)
 
         button_layout = QHBoxLayout()
